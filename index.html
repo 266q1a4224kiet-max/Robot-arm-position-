@@ -1,0 +1,430 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Robot Arm Position Calculator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: controls column beside a to-scale workspace canvas, results and the model underneath; stacks on phones. */
+:root {
+  color-scheme: dark;
+  --bg: #080d1d;
+  --panel: #111936;
+  --line: #29365e;
+  --text: #e8ecf8;
+  --muted: #9da9c9;
+  --link1: #4d7cff;
+  --link2: #62e6a1;
+  --target: #ff5577;
+  --effector: #ffcc55;
+  --warn: #ffb454;
+  --ok-bg: #132b22;
+  --warn-bg: #2e2412;
+  --bad-bg: #331622;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  padding-inline: 16px;
+  padding-block: 20px 32px;
+}
+.wrap { max-width: 1180px; margin-inline: auto; display: grid; gap: 16px; }
+header { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; }
+h1 { margin: 0; font-size: clamp(1.35rem, 4vw, 1.9rem); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+header p { margin: 4px 0 0; color: var(--muted); }
+.main { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+.panel, .visual { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; min-width: 0; }
+h2 { margin: 0 0 4px; font-size: 1rem; font-weight: 600; }
+label { display: block; margin: 14px 0 6px; color: var(--muted); font-size: 0.85rem; letter-spacing: 0.02em; }
+input, select {
+  width: 100%; padding: 11px 12px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 10px; font: 500 1rem var(--font-mono);
+}
+select { font-family: var(--font-body); }
+input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--link1); outline-offset: 2px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+button {
+  width: 100%; margin-top: 18px; padding: 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: #1b2748; color: var(--text); font: 600 0.95rem var(--font-body); cursor: pointer;
+}
+button:hover { background: #26356a; }
+.hint { margin: 14px 0 0; color: var(--muted); font-size: 0.82rem; }
+canvas { display: block; width: 100%; aspect-ratio: 3 / 2; background: var(--bg); border-radius: 12px; cursor: crosshair; }
+.results { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 14px; }
+.card { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.card small { display: block; color: var(--muted); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.card b { display: block; margin-top: 4px; font: 500 1.35rem var(--font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.status { margin-top: 12px; padding: 11px 14px; border-radius: 10px; background: var(--ok-bg); color: var(--link2); }
+.status.warn { background: var(--warn-bg); color: var(--warn); }
+.status.bad { background: var(--bad-bg); color: var(--target); }
+.model { margin-top: 12px; padding: 16px 18px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; color: var(--muted); overflow-x: auto; }
+.model b { color: var(--text); font-weight: 600; }
+.model pre { margin: 8px 0 0; font: 400 0.88rem/1.8 var(--font-mono); color: var(--text); }
+.model p { margin: 8px 0 0; font-size: 0.85rem; }
+@media (max-width: 820px) { .main { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Robot Arm Position Calculator</h1>
+    <p>2-link planar arm. Inverse kinematics, drawn to scale.</p>
+  </header>
+
+  <div class="main">
+    <section class="panel" aria-label="Arm inputs">
+      <h2>Inputs</h2>
+      <div class="row2">
+        <div>
+          <label for="L1">Link 1 (L₁)</label>
+          <input id="L1" type="number" inputmode="decimal" value="5" step="0.1" min="0.1">
+        </div>
+        <div>
+          <label for="L2">Link 2 (L₂)</label>
+          <input id="L2" type="number" inputmode="decimal" value="3" step="0.1" min="0.1">
+        </div>
+        <div>
+          <label for="targetX">Target X</label>
+          <input id="targetX" type="number" inputmode="decimal" value="6" step="0.1">
+        </div>
+        <div>
+          <label for="targetY">Target Y</label>
+          <input id="targetY" type="number" inputmode="decimal" value="2" step="0.1">
+        </div>
+      </div>
+      <label for="mode">Elbow</label>
+      <select id="mode">
+        <option value="up">Elbow up</option>
+        <option value="down">Elbow down</option>
+      </select>
+      <button id="reset" type="button">Reset</button>
+      <p class="hint">Results update as you type. Click or drag on the canvas to move the target.</p>
+    </section>
+
+    <section class="visual" aria-label="Arm view">
+      <canvas id="canvas" aria-label="Robot arm drawn on an x–y grid in link-length units"></canvas>
+
+      <div class="results">
+        <div class="card"><small>Joint angle θ₁</small><b id="theta1">--</b></div>
+        <div class="card"><small>Joint angle θ₂</small><b id="theta2">--</b></div>
+        <div class="card"><small>Position error</small><b id="error">--</b></div>
+      </div>
+
+      <div class="status" id="status" role="status" aria-live="polite">Enter values to calculate.</div>
+
+      <div class="model">
+        <b>Model</b>
+        <pre>x = L₁·cos(θ₁) + L₂·cos(θ₁ + θ₂)
+y = L₁·sin(θ₁) + L₂·sin(θ₁ + θ₂)
+
+cos(θ₂) = (x² + y² − L₁² − L₂²) / (2·L₁·L₂)
+θ₁ = atan2(y, x) − atan2(L₂·sin θ₂, L₁ + L₂·cos θ₂)</pre>
+        <p>Angles are counterclockwise from +x. θ₂ &lt; 0 puts the elbow above the base-to-target line (elbow up); θ₂ &gt; 0 puts it below. If the target is out of reach, the arm shows the closest pose and the error is the remaining distance.</p>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var canvas = $('canvas');
+  var ctx = canvas.getContext('2d');
+  var TAU = Math.PI * 2;
+  var DEG = 180 / Math.PI;
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var state = { L1: 5, L2: 3, tx: 6, ty: 2, c1: 0, c2: 0, f1: 0, f2: 0, reachable: true };
+  var W = 0, H = 0, scale = 1, raf = 0;
+
+  function wrap(a) {
+    a = (a + Math.PI) % TAU;
+    if (a < 0) a += TAU;
+    return a - Math.PI;
+  }
+
+  function solve(L1, L2, x, y, elbow) {
+    var d2 = x * x + y * y;
+    var raw = (d2 - L1 * L1 - L2 * L2) / (2 * L1 * L2);
+    var c = Math.max(-1, Math.min(1, raw));
+    var t2 = Math.acos(c);
+    if (elbow === 'up') t2 = -t2;
+    var t1 = Math.atan2(y, x) - Math.atan2(L2 * Math.sin(t2), L1 + L2 * Math.cos(t2));
+    return { t1: t1, t2: t2, reachable: raw >= -1 - 1e-9 && raw <= 1 + 1e-9 };
+  }
+
+  function pose(L1, L2, t1, t2) {
+    var jx = L1 * Math.cos(t1), jy = L1 * Math.sin(t1);
+    return { jx: jx, jy: jy, ex: jx + L2 * Math.cos(t1 + t2), ey: jy + L2 * Math.sin(t1 + t2) };
+  }
+
+  function fmt(n, d) {
+    var s = n.toFixed(d);
+    return s === '-0.00' || s === '-0.0' ? s.slice(1) : s;
+  }
+
+  function readInputs() {
+    var L1 = parseFloat($('L1').value), L2 = parseFloat($('L2').value);
+    var tx = parseFloat($('targetX').value), ty = parseFloat($('targetY').value);
+    if (!(L1 > 0) || !(L2 > 0) || !isFinite(tx) || !isFinite(ty)) return null;
+    return { L1: L1, L2: L2, tx: tx, ty: ty, mode: $('mode').value };
+  }
+
+  function setStatus(text, kind) {
+    var el = $('status');
+    el.textContent = text;
+    el.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  function update(jump) {
+    var v = readInputs();
+    if (!v) {
+      setStatus('Link lengths must be greater than 0, and the target needs numeric X and Y.', 'bad');
+      return;
+    }
+    state.L1 = v.L1; state.L2 = v.L2; state.tx = v.tx; state.ty = v.ty;
+
+    var s = solve(v.L1, v.L2, v.tx, v.ty, v.mode);
+    state.f1 = s.t1; state.f2 = s.t2; state.reachable = s.reachable;
+
+    var p = pose(v.L1, v.L2, s.t1, s.t2);
+    var err = Math.hypot(p.ex - v.tx, p.ey - v.ty);
+
+    $('theta1').textContent = fmt(s.t1 * DEG, 2) + '°';
+    $('theta2').textContent = fmt(s.t2 * DEG, 2) + '°';
+    $('error').textContent = fmt(err, 4);
+
+    if (s.reachable) {
+      setStatus('Target reached. End effector at (' + fmt(p.ex, 2) + ', ' + fmt(p.ey, 2) + ').');
+    } else if (Math.hypot(v.tx, v.ty) > v.L1 + v.L2) {
+      setStatus('Out of reach by ' + fmt(err, 2) + ' units. Arm is fully extended toward the target.', 'warn');
+    } else {
+      setStatus('Too close to the base by ' + fmt(err, 2) + ' units. Arm is folded as far as it goes.', 'warn');
+    }
+
+    if (jump || reduceMotion) {
+      cancelAnimationFrame(raf);
+      state.c1 = state.f1; state.c2 = state.f2;
+      draw();
+    } else {
+      animate();
+    }
+  }
+
+  function animate() {
+    cancelAnimationFrame(raf);
+    function tick() {
+      var d1 = wrap(state.f1 - state.c1);
+      var d2 = wrap(state.f2 - state.c2);
+      if (Math.abs(d1) < 1e-4 && Math.abs(d2) < 1e-4) {
+        state.c1 = state.f1; state.c2 = state.f2;
+        draw();
+        return;
+      }
+      state.c1 = wrap(state.c1 + d1 * 0.16);
+      state.c2 = wrap(state.c2 + d2 * 0.16);
+      draw();
+      raf = requestAnimationFrame(tick);
+    }
+    tick();
+  }
+
+  function niceStep(R) {
+    var steps = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+    for (var i = 0; i < steps.length; i++) if (R / steps[i] <= 8) return steps[i];
+    return 1000;
+  }
+
+  function viewRadius() {
+    return Math.max((state.L1 + state.L2) * 1.4, 1);
+  }
+
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  function draw() {
+    if (!W || !H) return;
+    var L1 = state.L1, L2 = state.L2;
+    var R = viewRadius();
+    scale = Math.min(W, H) / 2 / R;
+    var cx = W / 2, cy = H / 2;
+    var px = function (x) { return cx + x * scale; };
+    var py = function (y) { return cy - y * scale; };
+
+    var cMuted = css('--muted'), cLine = css('--line'), cText = css('--text'), cBg = css('--bg');
+    var cL1 = css('--link1'), cL2 = css('--link2'), cTarget = css('--target'), cEff = css('--effector');
+    var mono = '11px ' + css('--font-mono');
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = cBg;
+    ctx.fillRect(0, 0, W, H);
+
+    var step = niceStep(R);
+    var halfW = W / 2 / scale, halfH = H / 2 / scale;
+
+    // grid
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(77,124,255,0.14)';
+    ctx.beginPath();
+    for (var i = -Math.floor(halfW / step); i <= Math.floor(halfW / step); i++) {
+      var gx = Math.round(px(i * step)) + 0.5;
+      ctx.moveTo(gx, 0); ctx.lineTo(gx, H);
+    }
+    for (var j = -Math.floor(halfH / step); j <= Math.floor(halfH / step); j++) {
+      var gy = Math.round(py(j * step)) + 0.5;
+      ctx.moveTo(0, gy); ctx.lineTo(W, gy);
+    }
+    ctx.stroke();
+
+    // axes
+    ctx.strokeStyle = cLine;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, cy); ctx.lineTo(W, cy);
+    ctx.moveTo(cx, 0); ctx.lineTo(cx, H);
+    ctx.stroke();
+
+    // tick labels in link-length units
+    ctx.font = mono;
+    ctx.fillStyle = cMuted;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (var a = -Math.floor(halfW / step); a <= Math.floor(halfW / step); a++) {
+      if (a === 0) continue;
+      ctx.fillText(String(a * step), px(a * step), cy + 5);
+    }
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (var b = -Math.floor(halfH / step); b <= Math.floor(halfH / step); b++) {
+      if (b === 0) continue;
+      ctx.fillText(String(b * step), cx - 6, py(b * step));
+    }
+
+    // reachable workspace (annulus)
+    var rOut = (L1 + L2) * scale, rIn = Math.abs(L1 - L2) * scale;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rOut, 0, TAU);
+    if (rIn > 0.5) ctx.arc(cx, cy, rIn, 0, TAU, true);
+    ctx.fillStyle = 'rgba(98,230,161,0.05)';
+    ctx.fill('evenodd');
+    ctx.setLineDash([5, 5]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(98,230,161,0.45)';
+    ctx.beginPath(); ctx.arc(cx, cy, rOut, 0, TAU); ctx.stroke();
+    if (rIn > 0.5) { ctx.beginPath(); ctx.arc(cx, cy, rIn, 0, TAU); ctx.stroke(); }
+    ctx.setLineDash([]);
+
+    // arm
+    var p = pose(L1, L2, state.c1, state.c2);
+    var bx = cx, by = cy, jx = px(p.jx), jy = py(p.jy), ex = px(p.ex), ey = py(p.ey);
+
+    // target (clamped to view edge when off-screen)
+    var tx = px(state.tx), ty = py(state.ty);
+    var off = tx < 12 || tx > W - 12 || ty < 12 || ty > H - 12;
+    var tlabel = 'TARGET (' + fmt(state.tx, 1) + ', ' + fmt(state.ty, 1) + ')';
+    if (off) {
+      tx = Math.max(14, Math.min(W - 14, tx));
+      ty = Math.max(14, Math.min(H - 14, ty));
+      tlabel = 'TARGET (off view)';
+    }
+    if (!state.reachable) {
+      ctx.setLineDash([4, 5]);
+      ctx.strokeStyle = cTarget;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(tx, ty); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.strokeStyle = cTarget;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(tx, ty, 9, 0, TAU); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(tx - 15, ty); ctx.lineTo(tx - 5, ty);
+    ctx.moveTo(tx + 5, ty); ctx.lineTo(tx + 15, ty);
+    ctx.moveTo(tx, ty - 15); ctx.lineTo(tx, ty - 5);
+    ctx.moveTo(tx, ty + 5); ctx.lineTo(tx, ty + 15);
+    ctx.stroke();
+
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 13;
+    ctx.strokeStyle = cL1;
+    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(jx, jy); ctx.stroke();
+    ctx.strokeStyle = cL2;
+    ctx.beginPath(); ctx.moveTo(jx, jy); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.lineCap = 'butt';
+
+    function dot(x, y, r, fill) {
+      ctx.beginPath(); ctx.arc(x, y, r, 0, TAU);
+      ctx.fillStyle = fill; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = cBg; ctx.stroke();
+    }
+    dot(bx, by, 11, cText);
+    dot(jx, jy, 9, cText);
+    dot(ex, ey, 8, cEff);
+
+    // labels
+    ctx.font = mono;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = cText;
+    ctx.fillText('BASE', bx + 16, by + 16);
+    ctx.fillText('JOINT', jx + 14, jy - 14);
+    ctx.fillStyle = cEff;
+    ctx.fillText('END (' + fmt(p.ex, 2) + ', ' + fmt(p.ey, 2) + ')', Math.min(ex + 14, W - 130), ey + 20);
+    ctx.fillStyle = cTarget;
+    var tlx = tx + 16;
+    ctx.textAlign = 'left';
+    if (tlx + 140 > W) { ctx.textAlign = 'right'; tlx = tx - 16; }
+    ctx.fillText(tlabel, tlx, ty - 20);
+  }
+
+  function resize() {
+    var dpr = window.devicePixelRatio || 1;
+    W = canvas.clientWidth;
+    H = canvas.clientHeight;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
+  }
+
+  // click or drag to place the target
+  function setTargetFromEvent(e) {
+    var r = canvas.getBoundingClientRect();
+    var x = (e.clientX - r.left - W / 2) / scale;
+    var y = (H / 2 - (e.clientY - r.top)) / scale;
+    $('targetX').value = (Math.round(x * 10) / 10).toString();
+    $('targetY').value = (Math.round(y * 10) / 10).toString();
+    update(e.type === 'pointermove');
+  }
+  canvas.addEventListener('pointerdown', setTargetFromEvent);
+  canvas.addEventListener('pointermove', function (e) {
+    if (e.pointerType === 'mouse' && (e.buttons & 1)) setTargetFromEvent(e);
+  });
+
+  ['L1', 'L2', 'targetX', 'targetY'].forEach(function (id) {
+    $(id).addEventListener('input', function () { update(false); });
+  });
+  $('mode').addEventListener('change', function () { update(false); });
+
+  $('reset').addEventListener('click', function () {
+    $('L1').value = 5; $('L2').value = 3;
+    $('targetX').value = 6; $('targetY').value = 2;
+    $('mode').value = 'up';
+    update(false);
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas);
+  else window.addEventListener('resize', resize);
+
+  resize();
+  update(true);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+})();
+</script>
+
+</body></html>
